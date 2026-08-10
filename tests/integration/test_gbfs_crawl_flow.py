@@ -3,11 +3,11 @@ import csv
 from gbfs_feeds_collector.crawlers.feed_crawler import fetch_feed
 from gbfs_feeds_collector.crawlers.gbfs_crawler import fetch_gbfs
 from gbfs_feeds_collector.parsers import parse_feeds
-from gbfs_feeds_collector.crawlers.gbfs_providers_crawler import OUTPUT_PATH
+from gbfs_feeds_collector.settings import settings
 
 
 def _first_provider_with_auto_discovery_url():
-    with OUTPUT_PATH.open(newline="", encoding="utf-8") as providers_file:
+    with settings.gbfs_providers_csv_path.open(newline="", encoding="utf-8") as providers_file:
         for row in csv.DictReader(providers_file):
             if row["Auto-Discovery URL"]:
                 return row

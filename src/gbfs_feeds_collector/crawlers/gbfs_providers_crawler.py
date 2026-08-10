@@ -1,10 +1,8 @@
 import csv
 import io
 import urllib.request
-from pathlib import Path
 
 URL = "https://raw.githubusercontent.com/MobilityData/gbfs/master/systems.csv"
-OUTPUT_PATH = Path(__file__).resolve().parents[3] / "data" / "gbfs_providers.csv"
 
 EXPECTED_HEADER = [
     "Country Code",
