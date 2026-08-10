@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from gbfs_feeds_collector.crawlers.crawler_exceptions import (
@@ -14,6 +15,7 @@ from gbfs_feeds_collector.crawlers.gbfs_entity_crawler import (
     LAST_UPDATED_FORMAT,
     fetch_gbfs_entity,
 )
+from gbfs_feeds_collector.logging_config import configure_logging
 from gbfs_feeds_collector.parsers import (
     Provider,
     is_gbfs_v3_provider,
@@ -28,40 +30,93 @@ logger = logging.getLogger(__name__)
 _FETCH_ERRORS = (DownloadError, JSONFormatError, MissingLastUpdatedError)
 
 
+@dataclass
+class CrawlStats:
+    providers_total: int = 0
+    providers_processed: int = 0
+    providers_failed: int = 0
+    feeds_processed: int = 0
+    feeds_failed: int = 0
+
+    @property
+    def errors(self) -> int:
+        return self.providers_failed + self.feeds_failed
+
+
 def collect_data_from_gbfs_feeds(
     providers: list[Provider], storage: ObjectStorage, limit: int | None = None
-) -> None:
+) -> CrawlStats:
     providers = providers[:limit]
     logger.info("Starting crawl of %d provider(s)", len(providers))
 
-    feeds_saved = 0
+    stats = CrawlStats(providers_total=len(providers))
     for provider in providers:
         try:
             _, discovery_payload = fetch_gbfs_entity(str(provider.url))
             feeds = parse_feeds(discovery_payload)
         except _FETCH_ERRORS as error:
-            logger.warning("Skipping provider %s: %s", provider.id, error)
+            stats.providers_failed += 1
+            logger.warning(
+                "Skipping provider %s: %s",
+                provider.id,
+                error,
+                extra={"provider_id": provider.id, "error": str(error)},
+            )
             continue
 
-        logger.info("Discovered %d feed(s) for provider %s", len(feeds), provider.id)
+        stats.providers_processed += 1
+        logger.info(
+            "Discovered %d feed(s) for provider %s",
+            len(feeds),
+            provider.id,
+            extra={"provider_id": provider.id, "feeds_discovered": len(feeds)},
+        )
 
         for feed in feeds:
             try:
                 last_updated, payload = fetch_gbfs_entity(str(feed.url))
             except _FETCH_ERRORS as error:
+                stats.feeds_failed += 1
                 logger.warning(
-                    "Skipping feed %s for provider %s: %s", feed.name, provider.id, error
+                    "Skipping feed %s for provider %s: %s",
+                    feed.name,
+                    provider.id,
+                    error,
+                    extra={
+                        "provider_id": provider.id,
+                        "feed_name": feed.name,
+                        "error": str(error),
+                    },
                 )
                 continue
 
             key = f"{provider.id}/{feed.name}/{last_updated.strftime(LAST_UPDATED_FORMAT)}.json"
             storage.save(key, json.dumps(payload).encode("utf-8"))
-            feeds_saved += 1
-            logger.info("Saved feed %s for provider %s to %s", feed.name, provider.id, key)
+            stats.feeds_processed += 1
+            logger.info(
+                "Saved feed %s for provider %s to %s",
+                feed.name,
+                provider.id,
+                key,
+                extra={
+                    "provider_id": provider.id,
+                    "feed_name": feed.name,
+                    "storage_key": key,
+                },
+            )
 
     logger.info(
-        "Finished crawl: %d provider(s) processed, %d feed(s) saved", len(providers), feeds_saved
+        "Finished crawl",
+        extra={
+            "providers_total": stats.providers_total,
+            "providers_processed": stats.providers_processed,
+            "providers_failed": stats.providers_failed,
+            "feeds_processed": stats.feeds_processed,
+            "feeds_failed": stats.feeds_failed,
+            "errors": stats.errors,
+        },
     )
+    return stats
 
 
 def _parse_args() -> argparse.Namespace:
@@ -111,9 +166,7 @@ def _build_storage(args: argparse.Namespace) -> ObjectStorage:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s"
-    )
+    configure_logging()
     args = _parse_args()
     providers = parse_providers(args.providers_csv_path.read_bytes())
     logger.info("Loaded %d provider(s) from %s", len(providers), args.providers_csv_path)
