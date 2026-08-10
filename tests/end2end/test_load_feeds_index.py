@@ -1,4 +1,4 @@
-from gbfs_feeds_collector.load_feeds_index import (
+from gbfs_feeds_collector.load_gbfs_providers import (
     fetch_feeds_index,
     save_feeds_index,
     validate_feeds_index,
