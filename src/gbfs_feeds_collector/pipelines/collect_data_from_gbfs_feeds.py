@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+import httpx
 
 from gbfs_feeds_collector.crawlers.crawler_exceptions import (
     DownloadError,
@@ -29,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 _FETCH_ERRORS = (DownloadError, JSONFormatError, MissingLastUpdatedError)
 
+DEFAULT_CONCURRENCY = 20
+
 
 @dataclass
 class CrawlStats:
@@ -43,16 +48,58 @@ class CrawlStats:
         return self.providers_failed + self.feeds_failed
 
 
-def collect_data_from_gbfs_feeds(
-    providers: list[Provider], storage: ObjectStorage, limit: int | None = None
-) -> CrawlStats:
-    providers = providers[:limit]
-    logger.info("Starting crawl of %d provider(s)", len(providers))
-
-    stats = CrawlStats(providers_total=len(providers))
-    for provider in providers:
+async def _crawl_feed(
+    client: httpx.AsyncClient,
+    storage: ObjectStorage,
+    semaphore: asyncio.Semaphore,
+    provider: Provider,
+    feed,
+    stats: CrawlStats,
+) -> None:
+    async with semaphore:
         try:
-            _, discovery_payload = fetch_gbfs_entity(str(provider.url))
+            last_updated, payload = await fetch_gbfs_entity(client, str(feed.url))
+        except _FETCH_ERRORS as error:
+            stats.feeds_failed += 1
+            logger.warning(
+                "Skipping feed %s for provider %s: %s",
+                feed.name,
+                provider.id,
+                error,
+                extra={
+                    "provider_id": provider.id,
+                    "feed_name": feed.name,
+                    "error": str(error),
+                },
+            )
+            return
+
+    key = f"{provider.id}/{feed.name}/{last_updated.strftime(LAST_UPDATED_FORMAT)}.json"
+    await asyncio.to_thread(storage.save, key, json.dumps(payload).encode("utf-8"))
+    stats.feeds_processed += 1
+    logger.info(
+        "Saved feed %s for provider %s to %s",
+        feed.name,
+        provider.id,
+        key,
+        extra={
+            "provider_id": provider.id,
+            "feed_name": feed.name,
+            "storage_key": key,
+        },
+    )
+
+
+async def _crawl_provider(
+    client: httpx.AsyncClient,
+    storage: ObjectStorage,
+    semaphore: asyncio.Semaphore,
+    provider: Provider,
+    stats: CrawlStats,
+) -> None:
+    async with semaphore:
+        try:
+            _, discovery_payload = await fetch_gbfs_entity(client, str(provider.url))
             feeds = parse_feeds(discovery_payload)
         except _FETCH_ERRORS as error:
             stats.providers_failed += 1
@@ -62,48 +109,43 @@ def collect_data_from_gbfs_feeds(
                 error,
                 extra={"provider_id": provider.id, "error": str(error)},
             )
-            continue
+            return
 
-        stats.providers_processed += 1
-        logger.info(
-            "Discovered %d feed(s) for provider %s",
-            len(feeds),
-            provider.id,
-            extra={"provider_id": provider.id, "feeds_discovered": len(feeds)},
+    stats.providers_processed += 1
+    logger.info(
+        "Discovered %d feed(s) for provider %s",
+        len(feeds),
+        provider.id,
+        extra={"provider_id": provider.id, "feeds_discovered": len(feeds)},
+    )
+
+    await asyncio.gather(
+        *(
+            _crawl_feed(client, storage, semaphore, provider, feed, stats)
+            for feed in feeds
         )
+    )
 
-        for feed in feeds:
-            try:
-                last_updated, payload = fetch_gbfs_entity(str(feed.url))
-            except _FETCH_ERRORS as error:
-                stats.feeds_failed += 1
-                logger.warning(
-                    "Skipping feed %s for provider %s: %s",
-                    feed.name,
-                    provider.id,
-                    error,
-                    extra={
-                        "provider_id": provider.id,
-                        "feed_name": feed.name,
-                        "error": str(error),
-                    },
-                )
-                continue
 
-            key = f"{provider.id}/{feed.name}/{last_updated.strftime(LAST_UPDATED_FORMAT)}.json"
-            storage.save(key, json.dumps(payload).encode("utf-8"))
-            stats.feeds_processed += 1
-            logger.info(
-                "Saved feed %s for provider %s to %s",
-                feed.name,
-                provider.id,
-                key,
-                extra={
-                    "provider_id": provider.id,
-                    "feed_name": feed.name,
-                    "storage_key": key,
-                },
+async def collect_data_from_gbfs_feeds(
+    providers: list[Provider],
+    storage: ObjectStorage,
+    limit: int | None = None,
+    concurrency: int = DEFAULT_CONCURRENCY,
+) -> CrawlStats:
+    providers = providers[:limit]
+    logger.info("Starting crawl of %d provider(s)", len(providers))
+
+    stats = CrawlStats(providers_total=len(providers))
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async with httpx.AsyncClient() as client:
+        await asyncio.gather(
+            *(
+                _crawl_provider(client, storage, semaphore, provider, stats)
+                for provider in providers
             )
+        )
 
     logger.info(
         "Finished crawl",
@@ -153,6 +195,13 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Maximum number of providers to crawl (default: no limit).",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=DEFAULT_CONCURRENCY,
+        help="Maximum number of concurrent HTTP requests in flight "
+        f"(default: {DEFAULT_CONCURRENCY}).",
+    )
     args = parser.parse_args()
     if args.storage == "s3" and not args.s3_bucket:
         parser.error("--s3-bucket is required when --storage=s3")
@@ -165,15 +214,21 @@ def _build_storage(args: argparse.Namespace) -> ObjectStorage:
     return LocalFileSystemStorage(args.output_path)
 
 
-def main() -> None:
-    configure_logging()
-    args = _parse_args()
+async def _run(args: argparse.Namespace) -> None:
     providers = parse_providers(args.providers_csv_path.read_bytes())
     logger.info("Loaded %d provider(s) from %s", len(providers), args.providers_csv_path)
     providers = [provider for provider in providers if is_gbfs_v3_provider(provider)]
     logger.info("%d provider(s) support GBFS v3", len(providers))
     storage = _build_storage(args)
-    collect_data_from_gbfs_feeds(providers, storage, limit=args.limit)
+    await collect_data_from_gbfs_feeds(
+        providers, storage, limit=args.limit, concurrency=args.concurrency
+    )
+
+
+def main() -> None:
+    configure_logging()
+    args = _parse_args()
+    asyncio.run(_run(args))
 
 
 if __name__ == "__main__":

@@ -1,8 +1,7 @@
 import json
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 
+import httpx
 from pydantic import AnyHttpUrl, TypeAdapter
 
 from gbfs_feeds_collector.crawlers.crawler_exceptions import (
@@ -16,13 +15,14 @@ LAST_UPDATED_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 
 
-def fetch_gbfs_entity(url: str) -> tuple[datetime, dict]:
+async def fetch_gbfs_entity(client: httpx.AsyncClient, url: str) -> tuple[datetime, dict]:
     validated_url = _URL_ADAPTER.validate_python(url)
 
     try:
-        with urllib.request.urlopen(str(validated_url)) as response:
-            raw_body = response.read()
-    except (urllib.error.URLError, OSError) as error:
+        response = await client.get(str(validated_url))
+        response.raise_for_status()
+        raw_body = response.content
+    except httpx.HTTPError as error:
         raise DownloadError(f"Failed to download GBFS entity from {url}: {error}") from error
 
     try:

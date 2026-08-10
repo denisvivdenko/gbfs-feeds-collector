@@ -1,8 +1,6 @@
-import json
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 
 from gbfs_feeds_collector.crawlers.crawler_exceptions import (
@@ -11,20 +9,6 @@ from gbfs_feeds_collector.crawlers.crawler_exceptions import (
     MissingLastUpdatedError,
 )
 from gbfs_feeds_collector.crawlers.gbfs_entity_crawler import fetch_gbfs_entity
-
-
-class _FakeResponse:
-    def __init__(self, body: bytes):
-        self._body = body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc_info):
-        return False
-
-    def read(self):
-        return self._body
 
 
 @pytest.fixture
@@ -42,71 +26,79 @@ def gbfs_payload():
     }
 
 
-def test_fetch_gbfs_entity_returns_parsed_date_and_payload(monkeypatch, url, gbfs_payload):
-    monkeypatch.setattr(
-        urllib.request,
-        "urlopen",
-        lambda request_url: _FakeResponse(json.dumps(gbfs_payload).encode("utf-8")),
-    )
+def _client(handler) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
-    last_updated, payload = fetch_gbfs_entity(url)
+
+async def test_fetch_gbfs_entity_returns_parsed_date_and_payload(url, gbfs_payload):
+    def handler(request):
+        return httpx.Response(200, json=gbfs_payload)
+
+    async with _client(handler) as client:
+        last_updated, payload = await fetch_gbfs_entity(client, url)
 
     assert last_updated == datetime(2026, 8, 10, 11, 38, 42, tzinfo=timezone.utc)
     assert payload == gbfs_payload
 
 
-def test_fetch_gbfs_entity_raises_download_error_when_download_fails(monkeypatch, url):
-    def raise_url_error(request_url):
-        raise urllib.error.URLError("Connection refused")
+async def test_fetch_gbfs_entity_raises_download_error_when_download_fails(url):
+    def handler(request):
+        raise httpx.ConnectError("Connection refused", request=request)
 
-    monkeypatch.setattr(urllib.request, "urlopen", raise_url_error)
-
-    with pytest.raises(DownloadError) as exc_info:
-        fetch_gbfs_entity(url)
-
-    assert url in str(exc_info.value)
-
-
-def test_fetch_gbfs_entity_raises_json_format_error_when_body_is_not_valid_json(
-    monkeypatch, url
-):
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda request_url: _FakeResponse(b"not-valid-json")
-    )
-
-    with pytest.raises(JSONFormatError) as exc_info:
-        fetch_gbfs_entity(url)
+    async with _client(handler) as client:
+        with pytest.raises(DownloadError) as exc_info:
+            await fetch_gbfs_entity(client, url)
 
     assert url in str(exc_info.value)
 
 
-def test_fetch_gbfs_entity_raises_date_error_when_last_updated_is_missing(
-    monkeypatch, url, gbfs_payload
+async def test_fetch_gbfs_entity_raises_download_error_when_response_is_an_http_error(url):
+    def handler(request):
+        return httpx.Response(500, text="internal error")
+
+    async with _client(handler) as client:
+        with pytest.raises(DownloadError) as exc_info:
+            await fetch_gbfs_entity(client, url)
+
+    assert url in str(exc_info.value)
+
+
+async def test_fetch_gbfs_entity_raises_json_format_error_when_body_is_not_valid_json(url):
+    def handler(request):
+        return httpx.Response(200, text="not-valid-json")
+
+    async with _client(handler) as client:
+        with pytest.raises(JSONFormatError) as exc_info:
+            await fetch_gbfs_entity(client, url)
+
+    assert url in str(exc_info.value)
+
+
+async def test_fetch_gbfs_entity_raises_date_error_when_last_updated_is_missing(
+    url, gbfs_payload
 ):
     del gbfs_payload["last_updated"]
-    monkeypatch.setattr(
-        urllib.request,
-        "urlopen",
-        lambda request_url: _FakeResponse(json.dumps(gbfs_payload).encode("utf-8")),
-    )
 
-    with pytest.raises(MissingLastUpdatedError) as exc_info:
-        fetch_gbfs_entity(url)
+    def handler(request):
+        return httpx.Response(200, json=gbfs_payload)
+
+    async with _client(handler) as client:
+        with pytest.raises(MissingLastUpdatedError) as exc_info:
+            await fetch_gbfs_entity(client, url)
 
     assert url in str(exc_info.value)
 
 
-def test_fetch_gbfs_entity_raises_date_error_when_last_updated_has_wrong_format(
-    monkeypatch, url, gbfs_payload
+async def test_fetch_gbfs_entity_raises_date_error_when_last_updated_has_wrong_format(
+    url, gbfs_payload
 ):
     gbfs_payload["last_updated"] = "2026-08-10"
-    monkeypatch.setattr(
-        urllib.request,
-        "urlopen",
-        lambda request_url: _FakeResponse(json.dumps(gbfs_payload).encode("utf-8")),
-    )
 
-    with pytest.raises(MissingLastUpdatedError) as exc_info:
-        fetch_gbfs_entity(url)
+    def handler(request):
+        return httpx.Response(200, json=gbfs_payload)
+
+    async with _client(handler) as client:
+        with pytest.raises(MissingLastUpdatedError) as exc_info:
+            await fetch_gbfs_entity(client, url)
 
     assert "2026-08-10" in str(exc_info.value)
