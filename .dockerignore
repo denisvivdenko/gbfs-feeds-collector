@@ -1,0 +1,7 @@
+.git
+.venv
+.pytest_cache
+tests
+data/gbfs_feeds
+**/__pycache__
+**/*.pyc

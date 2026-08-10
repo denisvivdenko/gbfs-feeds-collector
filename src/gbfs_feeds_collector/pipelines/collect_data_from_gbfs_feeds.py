@@ -14,7 +14,12 @@ from gbfs_feeds_collector.crawlers.gbfs_entity_crawler import (
     LAST_UPDATED_FORMAT,
     fetch_gbfs_entity,
 )
-from gbfs_feeds_collector.parsers import Provider, parse_feeds, parse_providers
+from gbfs_feeds_collector.parsers import (
+    Provider,
+    is_gbfs_v3_provider,
+    parse_feeds,
+    parse_providers,
+)
 from gbfs_feeds_collector.settings import settings
 from gbfs_feeds_collector.storage import LocalFileSystemStorage, ObjectStorage, S3Storage
 
@@ -26,13 +31,19 @@ _FETCH_ERRORS = (DownloadError, JSONFormatError, MissingLastUpdatedError)
 def collect_data_from_gbfs_feeds(
     providers: list[Provider], storage: ObjectStorage, limit: int | None = None
 ) -> None:
-    for provider in providers[:limit]:
+    providers = providers[:limit]
+    logger.info("Starting crawl of %d provider(s)", len(providers))
+
+    feeds_saved = 0
+    for provider in providers:
         try:
             _, discovery_payload = fetch_gbfs_entity(str(provider.url))
             feeds = parse_feeds(discovery_payload)
         except _FETCH_ERRORS as error:
             logger.warning("Skipping provider %s: %s", provider.id, error)
             continue
+
+        logger.info("Discovered %d feed(s) for provider %s", len(feeds), provider.id)
 
         for feed in feeds:
             try:
@@ -45,6 +56,12 @@ def collect_data_from_gbfs_feeds(
 
             key = f"{provider.id}/{feed.name}/{last_updated.strftime(LAST_UPDATED_FORMAT)}.json"
             storage.save(key, json.dumps(payload).encode("utf-8"))
+            feeds_saved += 1
+            logger.info("Saved feed %s for provider %s to %s", feed.name, provider.id, key)
+
+    logger.info(
+        "Finished crawl: %d provider(s) processed, %d feed(s) saved", len(providers), feeds_saved
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -94,8 +111,14 @@ def _build_storage(args: argparse.Namespace) -> ObjectStorage:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s"
+    )
     args = _parse_args()
     providers = parse_providers(args.providers_csv_path.read_bytes())
+    logger.info("Loaded %d provider(s) from %s", len(providers), args.providers_csv_path)
+    providers = [provider for provider in providers if is_gbfs_v3_provider(provider)]
+    logger.info("%d provider(s) support GBFS v3", len(providers))
     storage = _build_storage(args)
     collect_data_from_gbfs_feeds(providers, storage, limit=args.limit)
 

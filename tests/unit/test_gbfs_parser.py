@@ -1,6 +1,12 @@
 import pytest
 
-from gbfs_feeds_collector.parsers import Feed, Provider, parse_feeds, parse_providers
+from gbfs_feeds_collector.parsers import (
+    Feed,
+    Provider,
+    is_gbfs_v3_provider,
+    parse_feeds,
+    parse_providers,
+)
 
 
 @pytest.fixture
