@@ -20,27 +20,14 @@ EXPECTED_HEADER = [
 ]
 
 
-def fetch_feeds_index(url: str = URL) -> bytes:
+def fetch_gbfs_providers(url: str = URL) -> bytes:
     with urllib.request.urlopen(url) as response:
+        data = response.read()
+        __validate(data)
         return response.read()
 
 
-def validate_feeds_index(data: bytes) -> None:
+def __validate(data: bytes) -> None:
     header = next(csv.reader(io.StringIO(data.decode("utf-8"))))
     if header != EXPECTED_HEADER:
         raise ValueError(f"Unexpected GBFS feeds index header: {header}")
-
-
-def save_feeds_index(data: bytes, output_path: Path = OUTPUT_PATH) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(data)
-
-
-def main() -> None:
-    data = fetch_feeds_index()
-    validate_feeds_index(data)
-    save_feeds_index(data)
-
-
-if __name__ == "__main__":
-    main()
