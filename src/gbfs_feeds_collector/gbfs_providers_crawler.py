@@ -24,7 +24,7 @@ def fetch_gbfs_providers(url: str = URL) -> bytes:
     with urllib.request.urlopen(url) as response:
         data = response.read()
         __validate(data)
-        return response.read()
+        return data
 
 
 def __validate(data: bytes) -> None:
