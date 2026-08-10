@@ -6,22 +6,11 @@ makes hundreds of real network calls and is meant to be run deliberately:
     uv run pytest tests/stress -m stress -s
 """
 
-import json
 import time
 
-import httpx
 import pytest
 
-from gbfs_feeds_collector.crawlers.crawler_exceptions import (
-    DownloadError,
-    JSONFormatError,
-    MissingLastUpdatedError,
-)
-from gbfs_feeds_collector.crawlers.gbfs_entity_crawler import (
-    LAST_UPDATED_FORMAT,
-    fetch_gbfs_entity,
-)
-from gbfs_feeds_collector.parsers import is_gbfs_v3_provider, parse_feeds, parse_providers
+from gbfs_feeds_collector.parsers import is_gbfs_v3_provider, parse_providers
 from gbfs_feeds_collector.pipelines.collect_data_from_gbfs_feeds import (
     collect_data_from_gbfs_feeds,
 )
