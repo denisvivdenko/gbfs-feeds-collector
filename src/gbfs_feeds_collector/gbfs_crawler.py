@@ -2,37 +2,35 @@ import json
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from pydantic import AnyHttpUrl, BaseModel
+
+from pydantic import AnyHttpUrl, TypeAdapter
 
 from gbfs_feeds_collector.crawler_exceptions import (
     DateError,
     DownloadError,
     JSONFormatError,
 )
+from gbfs_feeds_collector.feed_crawler import LAST_UPDATED_FORMAT
+
+_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 
 
-LAST_UPDATED_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+def fetch_gbfs(url: str) -> tuple[datetime, dict]:
+    validated_url = _URL_ADAPTER.validate_python(url)
 
-
-class Feed(BaseModel):
-    name: str
-    url: AnyHttpUrl
-
-
-def fetch_feed(feed: Feed) -> tuple[datetime, dict]:
     try:
-        with urllib.request.urlopen(str(feed.url)) as response:
+        with urllib.request.urlopen(str(validated_url)) as response:
             raw_body = response.read()
     except (urllib.error.URLError, OSError) as error:
         raise DownloadError(
-            f"Failed to download feed {feed.name!r} from {feed.url}: {error}"
+            f"Failed to download GBFS feed from {url}: {error}"
         ) from error
 
     try:
         payload = json.loads(raw_body)
     except json.JSONDecodeError as error:
         raise JSONFormatError(
-            f"Feed {feed.name!r} at {feed.url} did not return valid JSON: {error}"
+            f"GBFS feed at {url} did not return valid JSON: {error}"
         ) from error
 
     raw_last_updated = payload.get("last_updated")
@@ -42,7 +40,7 @@ def fetch_feed(feed: Feed) -> tuple[datetime, dict]:
         ).replace(tzinfo=timezone.utc)
     except (TypeError, ValueError) as error:
         raise DateError(
-            f"Feed {feed.name!r} at {feed.url} has an invalid 'last_updated' value "
+            f"GBFS feed at {url} has an invalid 'last_updated' value "
             f"{raw_last_updated!r}: {error}"
         ) from error
 
