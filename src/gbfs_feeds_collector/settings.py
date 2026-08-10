@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GBFS_")
 
     gbfs_providers_csv_path: Path = REPO_ROOT / "data" / "gbfs_providers.csv"
+    gbfs_feeds_dir: Path = REPO_ROOT / "data" / "gbfs_feeds"
 
 
 settings = Settings()
