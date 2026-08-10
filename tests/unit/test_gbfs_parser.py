@@ -60,6 +60,7 @@ def test_parse_providers_returns_provider_objects_with_auto_discovery_url(provid
             id="careem_bike",
             name="Careem BIKE",
             url="https://careem.publicbikesystem.net/gbfs.json",
+            supported_versions=["3.0"],
         ),
     ]
 
