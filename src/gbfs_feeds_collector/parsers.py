@@ -1,4 +1,9 @@
-from gbfs_feeds_collector.crawlers.feed_crawler import Feed
+from pydantic import AnyHttpUrl, BaseModel
+
+
+class Feed(BaseModel):
+    name: str
+    url: AnyHttpUrl
 
 
 def parse_feeds(payload: dict) -> list[Feed]:

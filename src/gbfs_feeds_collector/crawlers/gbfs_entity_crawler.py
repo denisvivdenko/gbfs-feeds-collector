@@ -10,27 +10,26 @@ from gbfs_feeds_collector.crawlers.crawler_exceptions import (
     DownloadError,
     JSONFormatError,
 )
-from gbfs_feeds_collector.crawlers.feed_crawler import LAST_UPDATED_FORMAT
+
+LAST_UPDATED_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 _URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 
 
-def fetch_gbfs(url: str) -> tuple[datetime, dict]:
+def fetch_gbfs_entity(url: str) -> tuple[datetime, dict]:
     validated_url = _URL_ADAPTER.validate_python(url)
 
     try:
         with urllib.request.urlopen(str(validated_url)) as response:
             raw_body = response.read()
     except (urllib.error.URLError, OSError) as error:
-        raise DownloadError(
-            f"Failed to download GBFS feed from {url}: {error}"
-        ) from error
+        raise DownloadError(f"Failed to download GBFS entity from {url}: {error}") from error
 
     try:
         payload = json.loads(raw_body)
     except json.JSONDecodeError as error:
         raise JSONFormatError(
-            f"GBFS feed at {url} did not return valid JSON: {error}"
+            f"GBFS entity at {url} did not return valid JSON: {error}"
         ) from error
 
     raw_last_updated = payload.get("last_updated")
@@ -40,7 +39,7 @@ def fetch_gbfs(url: str) -> tuple[datetime, dict]:
         ).replace(tzinfo=timezone.utc)
     except (TypeError, ValueError) as error:
         raise DateError(
-            f"GBFS feed at {url} has an invalid 'last_updated' value "
+            f"GBFS entity at {url} has an invalid 'last_updated' value "
             f"{raw_last_updated!r}: {error}"
         ) from error
 

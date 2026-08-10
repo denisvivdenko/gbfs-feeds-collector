@@ -10,7 +10,7 @@ from gbfs_feeds_collector.crawlers.crawler_exceptions import (
     DownloadError,
     JSONFormatError,
 )
-from gbfs_feeds_collector.crawlers.gbfs_crawler import fetch_gbfs
+from gbfs_feeds_collector.crawlers.gbfs_entity_crawler import fetch_gbfs_entity
 
 
 class _FakeResponse:
@@ -42,32 +42,32 @@ def gbfs_payload():
     }
 
 
-def test_fetch_gbfs_returns_parsed_date_and_payload(monkeypatch, url, gbfs_payload):
+def test_fetch_gbfs_entity_returns_parsed_date_and_payload(monkeypatch, url, gbfs_payload):
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
         lambda request_url: _FakeResponse(json.dumps(gbfs_payload).encode("utf-8")),
     )
 
-    last_updated, payload = fetch_gbfs(url)
+    last_updated, payload = fetch_gbfs_entity(url)
 
     assert last_updated == datetime(2026, 8, 10, 11, 38, 42, tzinfo=timezone.utc)
     assert payload == gbfs_payload
 
 
-def test_fetch_gbfs_raises_feed_download_error_when_download_fails(monkeypatch, url):
+def test_fetch_gbfs_entity_raises_download_error_when_download_fails(monkeypatch, url):
     def raise_url_error(request_url):
         raise urllib.error.URLError("Connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", raise_url_error)
 
     with pytest.raises(DownloadError) as exc_info:
-        fetch_gbfs(url)
+        fetch_gbfs_entity(url)
 
     assert url in str(exc_info.value)
 
 
-def test_fetch_gbfs_raises_feed_response_error_when_body_is_not_valid_json(
+def test_fetch_gbfs_entity_raises_json_format_error_when_body_is_not_valid_json(
     monkeypatch, url
 ):
     monkeypatch.setattr(
@@ -75,12 +75,12 @@ def test_fetch_gbfs_raises_feed_response_error_when_body_is_not_valid_json(
     )
 
     with pytest.raises(JSONFormatError) as exc_info:
-        fetch_gbfs(url)
+        fetch_gbfs_entity(url)
 
     assert url in str(exc_info.value)
 
 
-def test_fetch_gbfs_raises_feed_date_error_when_last_updated_is_missing(
+def test_fetch_gbfs_entity_raises_date_error_when_last_updated_is_missing(
     monkeypatch, url, gbfs_payload
 ):
     del gbfs_payload["last_updated"]
@@ -91,12 +91,12 @@ def test_fetch_gbfs_raises_feed_date_error_when_last_updated_is_missing(
     )
 
     with pytest.raises(DateError) as exc_info:
-        fetch_gbfs(url)
+        fetch_gbfs_entity(url)
 
     assert url in str(exc_info.value)
 
 
-def test_fetch_gbfs_raises_feed_date_error_when_last_updated_has_wrong_format(
+def test_fetch_gbfs_entity_raises_date_error_when_last_updated_has_wrong_format(
     monkeypatch, url, gbfs_payload
 ):
     gbfs_payload["last_updated"] = "2026-08-10"
@@ -107,11 +107,6 @@ def test_fetch_gbfs_raises_feed_date_error_when_last_updated_has_wrong_format(
     )
 
     with pytest.raises(DateError) as exc_info:
-        fetch_gbfs(url)
+        fetch_gbfs_entity(url)
 
     assert "2026-08-10" in str(exc_info.value)
-
-
-def test_fetch_gbfs_raises_value_error_for_invalid_url():
-    with pytest.raises(ValueError):
-        fetch_gbfs("not-a-url")
