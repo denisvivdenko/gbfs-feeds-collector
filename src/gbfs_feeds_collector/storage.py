@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Protocol
 
+import boto3
+
 
 class ObjectStorage(Protocol):
     def save(self, key: str, data: bytes) -> None: ...
@@ -31,3 +33,25 @@ class LocalFileSystemStorage:
             for path in prefix_path.rglob("*")
             if path.is_file()
         )
+
+
+class S3Storage:
+    def __init__(self, bucket: str, client=None):
+        self.bucket = bucket
+        self.client = client or boto3.client("s3")
+
+    def save(self, key: str, data: bytes) -> None:
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=data)
+
+    def read(self, key: str) -> bytes:
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"].read()
+
+    def list_keys(self, prefix: str) -> list[str]:
+        paginator = self.client.get_paginator("list_objects_v2")
+        keys = [
+            obj["Key"]
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix)
+            for obj in page.get("Contents", [])
+        ]
+        return sorted(keys)

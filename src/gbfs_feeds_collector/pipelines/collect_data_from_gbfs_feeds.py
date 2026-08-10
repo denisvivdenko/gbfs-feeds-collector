@@ -16,7 +16,7 @@ from gbfs_feeds_collector.crawlers.gbfs_entity_crawler import (
 )
 from gbfs_feeds_collector.parsers import Provider, parse_feeds, parse_providers
 from gbfs_feeds_collector.settings import settings
-from gbfs_feeds_collector.storage import LocalFileSystemStorage, ObjectStorage
+from gbfs_feeds_collector.storage import LocalFileSystemStorage, ObjectStorage, S3Storage
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +58,22 @@ def _parse_args() -> argparse.Namespace:
         help=f"Path to the providers CSV to read (default: {settings.gbfs_providers_csv_path}).",
     )
     parser.add_argument(
+        "--storage",
+        choices=["local", "s3"],
+        default="local",
+        help="Object storage backend to save raw GBFS feed JSON files to (default: local).",
+    )
+    parser.add_argument(
         "--output-path",
         type=Path,
         default=settings.gbfs_feeds_dir,
-        help=f"Root directory to save raw GBFS feed JSON files to (default: {settings.gbfs_feeds_dir}).",
+        help="Root directory to save raw GBFS feed JSON files to when using local storage "
+        f"(default: {settings.gbfs_feeds_dir}).",
+    )
+    parser.add_argument(
+        "--s3-bucket",
+        default=None,
+        help="S3 bucket to save raw GBFS feed JSON files to when using s3 storage.",
     )
     parser.add_argument(
         "--limit",
@@ -69,13 +81,22 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Maximum number of providers to crawl (default: no limit).",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.storage == "s3" and not args.s3_bucket:
+        parser.error("--s3-bucket is required when --storage=s3")
+    return args
+
+
+def _build_storage(args: argparse.Namespace) -> ObjectStorage:
+    if args.storage == "s3":
+        return S3Storage(args.s3_bucket)
+    return LocalFileSystemStorage(args.output_path)
 
 
 def main() -> None:
     args = _parse_args()
     providers = parse_providers(args.providers_csv_path.read_bytes())
-    storage = LocalFileSystemStorage(args.output_path)
+    storage = _build_storage(args)
     collect_data_from_gbfs_feeds(providers, storage, limit=args.limit)
 
 
