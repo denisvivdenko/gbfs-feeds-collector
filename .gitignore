@@ -219,4 +219,4 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-data/gdfs_feeds/
+data/gbfs_feeds/
