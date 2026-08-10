@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from pydantic import AnyHttpUrl, TypeAdapter
 
 from gbfs_feeds_collector.crawlers.crawler_exceptions import (
-    DateError,
     DownloadError,
     JSONFormatError,
+    MissingLastUpdatedError,
 )
 
 LAST_UPDATED_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -38,7 +38,7 @@ def fetch_gbfs_entity(url: str) -> tuple[datetime, dict]:
             raw_last_updated, LAST_UPDATED_FORMAT
         ).replace(tzinfo=timezone.utc)
     except (TypeError, ValueError) as error:
-        raise DateError(
+        raise MissingLastUpdatedError(
             f"GBFS entity at {url} has an invalid 'last_updated' value "
             f"{raw_last_updated!r}: {error}"
         ) from error

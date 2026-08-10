@@ -6,5 +6,5 @@ class JSONFormatError(Exception):
     pass
 
 
-class DateError(Exception):
+class MissingLastUpdatedError(Exception):
     pass

@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 import pytest
 
 from gbfs_feeds_collector.crawlers.crawler_exceptions import (
-    DateError,
     DownloadError,
     JSONFormatError,
+    MissingLastUpdatedError,
 )
 from gbfs_feeds_collector.crawlers.gbfs_entity_crawler import fetch_gbfs_entity
 
@@ -90,7 +90,7 @@ def test_fetch_gbfs_entity_raises_date_error_when_last_updated_is_missing(
         lambda request_url: _FakeResponse(json.dumps(gbfs_payload).encode("utf-8")),
     )
 
-    with pytest.raises(DateError) as exc_info:
+    with pytest.raises(MissingLastUpdatedError) as exc_info:
         fetch_gbfs_entity(url)
 
     assert url in str(exc_info.value)
@@ -106,7 +106,7 @@ def test_fetch_gbfs_entity_raises_date_error_when_last_updated_has_wrong_format(
         lambda request_url: _FakeResponse(json.dumps(gbfs_payload).encode("utf-8")),
     )
 
-    with pytest.raises(DateError) as exc_info:
+    with pytest.raises(MissingLastUpdatedError) as exc_info:
         fetch_gbfs_entity(url)
 
     assert "2026-08-10" in str(exc_info.value)
