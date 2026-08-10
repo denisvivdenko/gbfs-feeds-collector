@@ -1,9 +1,9 @@
 import csv
 
-from gbfs_feeds_collector.feed_crawler import fetch_feed
-from gbfs_feeds_collector.gbfs_crawler import fetch_gbfs
-from gbfs_feeds_collector.gbfs_parser import parse_feeds
-from gbfs_feeds_collector.gbfs_providers_crawler import OUTPUT_PATH
+from gbfs_feeds_collector.crawlers.feed_crawler import fetch_feed
+from gbfs_feeds_collector.crawlers.gbfs_crawler import fetch_gbfs
+from gbfs_feeds_collector.parsers.gbfs_parser import parse_feeds
+from gbfs_feeds_collector.crawlers.gbfs_providers_crawler import OUTPUT_PATH
 
 
 def _first_provider_with_auto_discovery_url():

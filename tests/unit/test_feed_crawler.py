@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gbfs_feeds_collector.crawler_exceptions import (
+from gbfs_feeds_collector.crawlers.crawler_exceptions import (
     DateError,
     DownloadError,
     JSONFormatError,
 )
-from gbfs_feeds_collector.feed_crawler import Feed, fetch_feed
+from gbfs_feeds_collector.crawlers.feed_crawler import Feed, fetch_feed
 
 
 class _FakeResponse:

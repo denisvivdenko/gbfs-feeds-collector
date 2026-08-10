@@ -1,4 +1,4 @@
-from gbfs_feeds_collector.feed_crawler import Feed
+from gbfs_feeds_collector.crawlers.feed_crawler import Feed
 
 
 def parse_feeds(payload: dict) -> list[Feed]:

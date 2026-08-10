@@ -1,7 +1,7 @@
 import pytest
 
-from gbfs_feeds_collector.feed_crawler import Feed
-from gbfs_feeds_collector.gbfs_parser import parse_feeds
+from gbfs_feeds_collector.crawlers.feed_crawler import Feed
+from gbfs_feeds_collector.parsers.gbfs_parser import parse_feeds
 
 
 @pytest.fixture
