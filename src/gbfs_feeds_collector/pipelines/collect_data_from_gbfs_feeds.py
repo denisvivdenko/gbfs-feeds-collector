@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from gbfs_feeds_collector.crawlers.crawler_exceptions import (
     DownloadError,
@@ -55,6 +57,7 @@ async def _crawl_feed(
     provider: Provider,
     feed,
     stats: CrawlStats,
+    feeds_bar: tqdm | None = None,
 ) -> None:
     async with semaphore:
         try:
@@ -72,12 +75,14 @@ async def _crawl_feed(
                     "error": str(error),
                 },
             )
+            if feeds_bar is not None:
+                feeds_bar.update(1)
             return
 
     key = f"{provider.id}/{feed.name}/{last_updated.strftime(LAST_UPDATED_FORMAT)}.json"
     await asyncio.to_thread(storage.save, key, json.dumps(payload).encode("utf-8"))
     stats.feeds_processed += 1
-    logger.info(
+    logger.debug(
         "Saved feed %s for provider %s to %s",
         feed.name,
         provider.id,
@@ -88,6 +93,8 @@ async def _crawl_feed(
             "storage_key": key,
         },
     )
+    if feeds_bar is not None:
+        feeds_bar.update(1)
 
 
 async def _crawl_provider(
@@ -96,6 +103,8 @@ async def _crawl_provider(
     semaphore: asyncio.Semaphore,
     provider: Provider,
     stats: CrawlStats,
+    feeds_bar: tqdm | None = None,
+    providers_bar: tqdm | None = None,
 ) -> None:
     async with semaphore:
         try:
@@ -109,22 +118,29 @@ async def _crawl_provider(
                 error,
                 extra={"provider_id": provider.id, "error": str(error)},
             )
+            if providers_bar is not None:
+                providers_bar.update(1)
             return
 
     stats.providers_processed += 1
-    logger.info(
+    logger.debug(
         "Discovered %d feed(s) for provider %s",
         len(feeds),
         provider.id,
         extra={"provider_id": provider.id, "feeds_discovered": len(feeds)},
     )
+    if feeds_bar is not None:
+        feeds_bar.total = (feeds_bar.total or 0) + len(feeds)
+        feeds_bar.refresh()
 
     await asyncio.gather(
         *(
-            _crawl_feed(client, storage, semaphore, provider, feed, stats)
+            _crawl_feed(client, storage, semaphore, provider, feed, stats, feeds_bar)
             for feed in feeds
         )
     )
+    if providers_bar is not None:
+        providers_bar.update(1)
 
 
 async def collect_data_from_gbfs_feeds(
@@ -139,13 +155,20 @@ async def collect_data_from_gbfs_feeds(
     stats = CrawlStats(providers_total=len(providers))
     semaphore = asyncio.Semaphore(concurrency)
 
-    async with httpx.AsyncClient() as client:
-        await asyncio.gather(
-            *(
-                _crawl_provider(client, storage, semaphore, provider, stats)
-                for provider in providers
-            )
-        )
+    with logging_redirect_tqdm():
+        with (
+            tqdm(total=len(providers), desc="Providers", unit="provider") as providers_bar,
+            tqdm(total=0, desc="Feeds", unit="feed") as feeds_bar,
+        ):
+            async with httpx.AsyncClient() as client:
+                await asyncio.gather(
+                    *(
+                        _crawl_provider(
+                            client, storage, semaphore, provider, stats, feeds_bar, providers_bar
+                        )
+                        for provider in providers
+                    )
+                )
 
     logger.info(
         "Finished crawl",
