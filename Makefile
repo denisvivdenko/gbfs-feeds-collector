@@ -1,6 +1,8 @@
 IMAGE := gbfs-feeds-collector
 AWS_REGION ?= eu-west-3
 ENV_FILE ?= .env.prod
+LIGHTSAIL_SERVICE ?= gbfs-feeds-collector
+LIGHTSAIL_LABEL ?= app
 
 .PHONY: docker-build
 docker-build:
@@ -28,3 +30,12 @@ endif
 		-e S3_BUCKET=$(S3_BUCKET) \
 		-e AWS_REGION=$(AWS_REGION) \
 		$(IMAGE)
+
+.PHONY: lightsail-push
+lightsail-push:
+	docker build --platform linux/amd64 -t $(IMAGE):amd64 .
+	aws lightsail push-container-image \
+		--region $(AWS_REGION) \
+		--service-name $(LIGHTSAIL_SERVICE) \
+		--label $(LIGHTSAIL_LABEL) \
+		--image $(IMAGE):amd64

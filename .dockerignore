@@ -5,3 +5,5 @@ tests
 data/gbfs_feeds
 **/__pycache__
 **/*.pyc
+.env*
+terraform/
