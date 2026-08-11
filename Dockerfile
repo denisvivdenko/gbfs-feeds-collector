@@ -16,8 +16,7 @@ ENV PATH="/app/.venv/bin:${PATH}"
 
 # Storage backend to write raw GBFS payloads to: "fs" (local filesystem) or "s3".
 ENV STORAGE=fs
-# Seconds to sleep between crawl runs.
-ENV INTERVAL=20
+# Per-feed crawl intervals are configured in data/feeds_schedule.yaml.
 # Maximum number of providers to crawl per run (unset = no limit).
 # ENV LIMIT_PROVIDERS_CRAWLED=10
 

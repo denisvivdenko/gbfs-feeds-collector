@@ -6,11 +6,31 @@ from gbfs_feeds_collector.parsers import parse_providers
 from gbfs_feeds_collector.settings import settings
 from gbfs_feeds_collector.storage import LocalFileSystemStorage
 
+_ALL_STANDARD_FEED_NAMES = [
+    "gbfs_versions",
+    "system_information",
+    "vehicle_types",
+    "station_information",
+    "station_status",
+    "free_bike_status",
+    "vehicle_status",
+    "system_hours",
+    "system_calendar",
+    "system_regions",
+    "system_pricing_plans",
+    "system_alerts",
+    "geofencing_zones",
+]
+
 
 def test_collect_data_from_gbfs_feeds_script_saves_raw_feeds_under_provider_and_feed_name(
     tmp_path,
 ):
     output_path = tmp_path / "gbfs_feeds"
+    schedule_path = tmp_path / "feeds_schedule.yaml"
+    schedule_path.write_text(
+        "\n".join(f"{name}: 1" for name in _ALL_STANDARD_FEED_NAMES) + "\n"
+    )
 
     result = subprocess.run(
         [
@@ -19,7 +39,11 @@ def test_collect_data_from_gbfs_feeds_script_saves_raw_feeds_under_provider_and_
             "gbfs_feeds_collector.pipelines.collect_data_from_gbfs_feeds",
             "--output-path",
             str(output_path),
+            "--feeds-schedule-path",
+            str(schedule_path),
             "--limit",
+            "1",
+            "--max-cycles",
             "1",
         ],
         capture_output=True,

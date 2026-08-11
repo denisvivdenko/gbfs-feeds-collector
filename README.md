@@ -16,8 +16,10 @@ provider's feeds, and saves the raw JSON payloads to a storage backend (local fi
 make crawl-local
 ```
 
-Builds the image and runs one crawl against the local filesystem, limited to 5 providers,
-writing output to `./data/gbfs_feeds`.
+Builds the image and runs the crawler as a long-running service against the local
+filesystem, limited to 5 providers, writing output to `./data/gbfs_feeds`. Each feed
+name is crawled on its own interval, per `data/feeds_schedule.yaml`. Stop it with
+Ctrl+C.
 
 ### Without Docker
 
@@ -37,13 +39,24 @@ Useful CLI flags (see `--help` for the full list):
 | `--limit N` | Max number of providers to crawl (default: no limit) |
 | `--concurrency N` | Max concurrent HTTP requests (default: 20) |
 | `--providers-csv-path PATH` | Providers CSV to read (default: `data/gbfs_providers.csv`) |
+| `--feeds-schedule-path PATH` | YAML file mapping feed name to crawl interval in seconds; feed names not listed are skipped entirely (default: `data/feeds_schedule.yaml`) |
+| `--max-cycles N` | Number of crawl cycles to run per feed before exiting (default: run forever) |
 
-The Docker image instead wraps this in an infinite loop (`entrypoint.sh`), controlled by env vars:
+Each feed name (`station_status`, `station_information`, ...) is crawled on its own
+schedule, independent of every other feed name, driven by `data/feeds_schedule.yaml`:
+
+```yaml
+station_status: 60      # crawl every 60s
+station_information: 3600  # crawl every hour
+```
+
+Without `--max-cycles`, the process is the schedule — it runs forever, crawling each
+feed name whenever its own interval elapses. The Docker image (`entrypoint.sh`) just
+execs this directly, so it's a long-running service controlled by env vars:
 
 | Env var | Description |
 | --- | --- |
 | `STORAGE` | `fs` (local) or `s3` (default: `fs`) |
-| `INTERVAL` | Seconds to sleep between crawl runs (default: `20`) |
 | `S3_BUCKET` | Required when `STORAGE=s3` |
 | `LIMIT_PROVIDERS_CRAWLED` | Max providers per run (default: no limit) |
 

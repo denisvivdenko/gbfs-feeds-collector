@@ -31,6 +31,11 @@ endif
 		-e AWS_REGION=$(AWS_REGION) \
 		$(IMAGE)
 
+
+.PHONY: login-aws
+login-aws:
+	eval "$$(aws configure export-credentials --format env)"
+
 .PHONY: lightsail-push
 lightsail-push:
 	docker build --platform linux/amd64 -t $(IMAGE):amd64 .

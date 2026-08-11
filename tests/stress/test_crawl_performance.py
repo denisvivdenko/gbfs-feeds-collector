@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from gbfs_feeds_collector.feed_schedule import load_feed_schedule
 from gbfs_feeds_collector.parsers import is_gbfs_v3_provider, parse_providers
 from gbfs_feeds_collector.pipelines.collect_data_from_gbfs_feeds import (
     collect_data_from_gbfs_feeds,
@@ -38,9 +39,10 @@ def _report(label: str, elapsed: float, providers_total: int, feeds_processed: i
 async def test_concurrent_asyncio_crawl_performance(tmp_path):
     providers = _sample_providers()
     storage = LocalFileSystemStorage(tmp_path)
+    schedule = load_feed_schedule(settings.gbfs_feeds_schedule_path)
 
     start = time.perf_counter()
-    stats = await collect_data_from_gbfs_feeds(providers, storage)
+    stats = await collect_data_from_gbfs_feeds(providers, storage, schedule, max_cycles=1)
     elapsed = time.perf_counter() - start
 
     _report("concurrent asyncio", elapsed, stats.providers_total, stats.feeds_processed)

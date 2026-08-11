@@ -4,12 +4,11 @@ import argparse
 import asyncio
 import json
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
-from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 from gbfs_feeds_collector.crawlers.crawler_exceptions import (
     DownloadError,
@@ -20,8 +19,10 @@ from gbfs_feeds_collector.crawlers.gbfs_entity_crawler import (
     LAST_UPDATED_FORMAT,
     fetch_gbfs_entity,
 )
+from gbfs_feeds_collector.feed_schedule import FeedSchedule, load_feed_schedule
 from gbfs_feeds_collector.logging_config import configure_logging
 from gbfs_feeds_collector.parsers import (
+    Feed,
     Provider,
     is_gbfs_v3_provider,
     parse_feeds,
@@ -55,9 +56,8 @@ async def _crawl_feed(
     storage: ObjectStorage,
     semaphore: asyncio.Semaphore,
     provider: Provider,
-    feed,
+    feed: Feed,
     stats: CrawlStats,
-    feeds_bar: tqdm | None = None,
 ) -> None:
     async with semaphore:
         try:
@@ -75,8 +75,6 @@ async def _crawl_feed(
                     "error": str(error),
                 },
             )
-            if feeds_bar is not None:
-                feeds_bar.update(1)
             return
 
     key = f"{provider.id}/{feed.name}/{last_updated.strftime(LAST_UPDATED_FORMAT)}.json"
@@ -93,61 +91,90 @@ async def _crawl_feed(
             "storage_key": key,
         },
     )
-    if feeds_bar is not None:
-        feeds_bar.update(1)
 
 
-async def _crawl_provider(
+async def _discover_feeds(
+    client: httpx.AsyncClient,
+    providers: list[Provider],
+    schedule: FeedSchedule,
+    semaphore: asyncio.Semaphore,
+    stats: CrawlStats,
+) -> dict[str, list[tuple[Provider, Feed]]]:
+    feeds_by_name: dict[str, list[tuple[Provider, Feed]]] = defaultdict(list)
+
+    async def discover_one(provider: Provider) -> None:
+        async with semaphore:
+            try:
+                _, discovery_payload = await fetch_gbfs_entity(client, str(provider.url))
+                feeds = parse_feeds(discovery_payload)
+            except _FETCH_ERRORS as error:
+                stats.providers_failed += 1
+                logger.warning(
+                    "Skipping provider %s: %s",
+                    provider.id,
+                    error,
+                    extra={"provider_id": provider.id, "error": str(error)},
+                )
+                return
+
+        stats.providers_processed += 1
+        scheduled_feeds = [feed for feed in feeds if feed.name in schedule]
+        logger.debug(
+            "Discovered %d feed(s) for provider %s, %d scheduled",
+            len(feeds),
+            provider.id,
+            len(scheduled_feeds),
+            extra={
+                "provider_id": provider.id,
+                "feeds_discovered": len(feeds),
+                "feeds_scheduled": len(scheduled_feeds),
+            },
+        )
+        for feed in scheduled_feeds:
+            feeds_by_name[feed.name].append((provider, feed))
+
+    await asyncio.gather(*(discover_one(provider) for provider in providers))
+    return feeds_by_name
+
+
+async def _run_feed_schedule(
+    feed_name: str,
+    entries: list[tuple[Provider, Feed]],
+    interval_seconds: int,
     client: httpx.AsyncClient,
     storage: ObjectStorage,
     semaphore: asyncio.Semaphore,
-    provider: Provider,
     stats: CrawlStats,
-    feeds_bar: tqdm | None = None,
-    providers_bar: tqdm | None = None,
+    max_cycles: int | None,
 ) -> None:
-    async with semaphore:
-        try:
-            _, discovery_payload = await fetch_gbfs_entity(client, str(provider.url))
-            feeds = parse_feeds(discovery_payload)
-        except _FETCH_ERRORS as error:
-            stats.providers_failed += 1
-            logger.warning(
-                "Skipping provider %s: %s",
-                provider.id,
-                error,
-                extra={"provider_id": provider.id, "error": str(error)},
+    cycle = 0
+    while True:
+        await asyncio.gather(
+            *(
+                _crawl_feed(client, storage, semaphore, provider, feed, stats)
+                for provider, feed in entries
             )
-            if providers_bar is not None:
-                providers_bar.update(1)
-            return
-
-    stats.providers_processed += 1
-    logger.debug(
-        "Discovered %d feed(s) for provider %s",
-        len(feeds),
-        provider.id,
-        extra={"provider_id": provider.id, "feeds_discovered": len(feeds)},
-    )
-    if feeds_bar is not None:
-        feeds_bar.total = (feeds_bar.total or 0) + len(feeds)
-        feeds_bar.refresh()
-
-    await asyncio.gather(
-        *(
-            _crawl_feed(client, storage, semaphore, provider, feed, stats, feeds_bar)
-            for feed in feeds
         )
-    )
-    if providers_bar is not None:
-        providers_bar.update(1)
+        cycle += 1
+        logger.info(
+            "Completed crawl cycle %d for feed %s (%d source(s))",
+            cycle,
+            feed_name,
+            len(entries),
+            extra={"feed_name": feed_name, "cycle": cycle, "sources": len(entries)},
+        )
+        if max_cycles is not None and cycle >= max_cycles:
+            return
+        await asyncio.sleep(interval_seconds)
 
 
 async def collect_data_from_gbfs_feeds(
     providers: list[Provider],
     storage: ObjectStorage,
+    schedule: FeedSchedule,
     limit: int | None = None,
     concurrency: int = DEFAULT_CONCURRENCY,
+    max_cycles: int | None = None,
 ) -> CrawlStats:
     providers = providers[:limit]
     logger.info("Starting crawl of %d provider(s)", len(providers))
@@ -155,20 +182,32 @@ async def collect_data_from_gbfs_feeds(
     stats = CrawlStats(providers_total=len(providers))
     semaphore = asyncio.Semaphore(concurrency)
 
-    with logging_redirect_tqdm():
-        with (
-            tqdm(total=len(providers), desc="Providers", unit="provider") as providers_bar,
-            tqdm(total=0, desc="Feeds", unit="feed") as feeds_bar,
-        ):
-            async with httpx.AsyncClient() as client:
-                await asyncio.gather(
-                    *(
-                        _crawl_provider(
-                            client, storage, semaphore, provider, stats, feeds_bar, providers_bar
-                        )
-                        for provider in providers
-                    )
+    async with httpx.AsyncClient() as client:
+        feeds_by_name = await _discover_feeds(client, providers, schedule, semaphore, stats)
+
+        missing = set(schedule) - set(feeds_by_name)
+        if missing:
+            logger.info(
+                "No provider currently exposes feed(s): %s",
+                ", ".join(sorted(missing)),
+                extra={"missing_feeds": sorted(missing)},
+            )
+
+        await asyncio.gather(
+            *(
+                _run_feed_schedule(
+                    feed_name,
+                    entries,
+                    schedule[feed_name],
+                    client,
+                    storage,
+                    semaphore,
+                    stats,
+                    max_cycles,
                 )
+                for feed_name, entries in feeds_by_name.items()
+            )
+        )
 
     logger.info(
         "Finished crawl",
@@ -193,6 +232,13 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=settings.gbfs_providers_csv_path,
         help=f"Path to the providers CSV to read (default: {settings.gbfs_providers_csv_path}).",
+    )
+    parser.add_argument(
+        "--feeds-schedule-path",
+        type=Path,
+        default=settings.gbfs_feeds_schedule_path,
+        help="Path to the YAML file mapping feed name to crawl interval in seconds. "
+        f"Feed names not listed are skipped entirely (default: {settings.gbfs_feeds_schedule_path}).",
     )
     parser.add_argument(
         "--storage",
@@ -225,6 +271,12 @@ def _parse_args() -> argparse.Namespace:
         help="Maximum number of concurrent HTTP requests in flight "
         f"(default: {DEFAULT_CONCURRENCY}).",
     )
+    parser.add_argument(
+        "--max-cycles",
+        type=int,
+        default=None,
+        help="Number of crawl cycles to run per feed before exiting (default: run forever).",
+    )
     args = parser.parse_args()
     if args.storage == "s3" and not args.s3_bucket:
         parser.error("--s3-bucket is required when --storage=s3")
@@ -242,9 +294,15 @@ async def _run(args: argparse.Namespace) -> None:
     logger.info("Loaded %d provider(s) from %s", len(providers), args.providers_csv_path)
     providers = [provider for provider in providers if is_gbfs_v3_provider(provider)]
     logger.info("%d provider(s) support GBFS v3", len(providers))
+    schedule = load_feed_schedule(args.feeds_schedule_path)
     storage = _build_storage(args)
     await collect_data_from_gbfs_feeds(
-        providers, storage, limit=args.limit, concurrency=args.concurrency
+        providers,
+        storage,
+        schedule,
+        limit=args.limit,
+        concurrency=args.concurrency,
+        max_cycles=args.max_cycles,
     )
 
 

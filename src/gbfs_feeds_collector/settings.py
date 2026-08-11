@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     gbfs_providers_csv_path: Path = REPO_ROOT / "data" / "gbfs_providers.csv"
     gbfs_feeds_dir: Path = REPO_ROOT / "data" / "gbfs_feeds"
+    gbfs_feeds_schedule_path: Path = REPO_ROOT / "data" / "feeds_schedule.yaml"
 
 
 settings = Settings()

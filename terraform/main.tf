@@ -68,7 +68,6 @@ resource "aws_lightsail_container_service_deployment_version" "crawler" {
       AWS_ACCESS_KEY_ID       = aws_iam_access_key.crawler.id
       AWS_SECRET_ACCESS_KEY   = aws_iam_access_key.crawler.secret
       LIMIT_PROVIDERS_CRAWLED = 15
-      INTERVAL                = 120
     }
   }
 }

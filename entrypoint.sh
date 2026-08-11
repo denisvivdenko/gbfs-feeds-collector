@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
 set -eu
 
-INTERVAL="${INTERVAL:-20}"
 STORAGE="${STORAGE:-fs}"
 
 case "$STORAGE" in
@@ -29,10 +28,6 @@ if [ -n "${LIMIT_PROVIDERS_CRAWLED:-}" ]; then
   set -- "$@" --limit "$LIMIT_PROVIDERS_CRAWLED"
 fi
 
-echo "Starting GBFS feed collector loop (storage=${STORAGE_ARG}, interval=${INTERVAL}s)"
+echo "Starting GBFS feed collector (storage=${STORAGE_ARG}, per-feed schedule from data/feeds_schedule.yaml)"
 
-while true; do
-  python -m gbfs_feeds_collector.pipelines.collect_data_from_gbfs_feeds "$@"
-  echo "Sleeping ${INTERVAL}s until next run"
-  sleep "$INTERVAL"
-done
+exec python -m gbfs_feeds_collector.pipelines.collect_data_from_gbfs_feeds "$@"

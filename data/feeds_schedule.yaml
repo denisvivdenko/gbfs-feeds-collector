@@ -1,0 +1,15 @@
+# Feed names follow the GBFS spec (https://gbfs.org). 
+# Value = minimum seconds
+# between crawls of that feed, across all providers that expose it.
+# Feeds not listed here are skipped entirely.
+
+# Real-time feeds: crawl frequently.
+station_status: 300 
+free_bike_status: 300
+vehicle_status: 300
+system_alerts: 300
+
+# Near-static feeds: change rarely, crawl infrequently.
+station_information: 14400
+vehicle_types: 14400
+system_pricing_plans: 14400
