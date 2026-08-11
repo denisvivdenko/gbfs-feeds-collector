@@ -62,11 +62,13 @@ resource "aws_lightsail_container_service_deployment_version" "crawler" {
     image          = var.container_image
 
     environment = {
-      STORAGE               = "s3"
-      S3_BUCKET             = var.bucket_name
-      AWS_REGION            = "eu-west-3"
-      AWS_ACCESS_KEY_ID     = aws_iam_access_key.crawler.id
-      AWS_SECRET_ACCESS_KEY = aws_iam_access_key.crawler.secret
+      STORAGE                 = "s3"
+      S3_BUCKET               = var.bucket_name
+      AWS_REGION              = "eu-west-3"
+      AWS_ACCESS_KEY_ID       = aws_iam_access_key.crawler.id
+      AWS_SECRET_ACCESS_KEY   = aws_iam_access_key.crawler.secret
+      LIMIT_PROVIDERS_CRAWLED = 15
+      INTERVAL                = 120
     }
   }
 }
